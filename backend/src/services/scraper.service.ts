@@ -1,43 +1,39 @@
 import { chromium } from "playwright";
+import { expect } from "playwright/test";
 
 const STORE_URL = "https://demo.inelabteamdev.com";
 
 export async function scrapeProduct(productId: number) {
   const browser = await chromium.launch({
-    headless: true,
+    headless: false,
+    slowMo: 300,
   });
 
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
-    console.log("Opening product page...");
-
-    await page.goto(`${STORE_URL}/product/${productId}`, {
+    await page.goto(`https://demo.inelabteamdev.com/product/${productId}`, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
 
-    console.log("Page loaded");
-
-    // -----------------------------
-    // 1. Handle consent dialog
-    // -----------------------------
-
     const acceptButton = page.getByRole("button", {
-      name: /^accept$/i,
+      name: /accept|allow all/i,
     });
 
-    if (await acceptButton.isVisible().catch(() => false)) {
-      console.log("Consent dialog found. Accepting...");
+    try {
+      await acceptButton.waitFor({
+        state: "visible",
+        timeout: 10_000,
+      });
+
       await acceptButton.click();
-      await page.waitForTimeout(500);
+
+      console.log("Cookie banner handled successfully.");
+    } catch {
+      console.log("Cookie banner did not appear within 10 seconds.");
     }
-
-    // -----------------------------
-    // 2. Hover price section
-    // -----------------------------
-
-    console.log("Looking for Price hidden...");
 
     const priceHidden = page.getByText("Price hidden", {
       exact: true,
@@ -48,55 +44,39 @@ export async function scrapeProduct(productId: number) {
       timeout: 10_000,
     });
 
-    console.log("Hovering price area...");
-
     await priceHidden.hover();
-
-    // -----------------------------
-    // 3. Wait for Reveal Price
-    // -----------------------------
 
     const revealButton = page.getByRole("button", {
       name: /reveal price/i,
     });
 
-    console.log("Waiting for Reveal Price to become enabled...");
-
-
-    console.log("Reveal Price is enabled");
-
-    // -----------------------------
-    // 4. Click
-    // -----------------------------
+    await expect(revealButton).toBeEnabled({
+      timeout: 10_000,
+    });
 
     await revealButton.click();
 
     console.log("Reveal Price clicked");
 
-    // -----------------------------
-    // 5. Wait for dynamic price
-    // -----------------------------
+    await page.waitForFunction(
+      () => {
+        const body = document.body.innerText;
 
-    await page.waitForFunction(() => {
-      const body = document.body.innerText;
-
-      return (
-        !body.includes("Loading current price...") &&
-        /₹[\d,]+/.test(body)
-      );
-    }, { timeout: 15_000 });
+        return (
+          !body.includes("Loading current price...") && /₹[\d,]+/.test(body)
+        );
+      },
+      { timeout: 15_000 },
+    );
 
     console.log("Price loaded");
 
     const bodyText = await page.locator("body").innerText();
 
-    console.log(bodyText);
-
     return {
       productId,
       bodyText,
     };
-
   } finally {
     await browser.close();
   }
